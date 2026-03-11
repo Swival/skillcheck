@@ -1,0 +1,57 @@
+[project]
+name = "skillscheck"
+version = "0.1.0"
+description = "Validate agent skills against the agentskills.io specification"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "Frank Denis", email = "github@pureftpd.org" },
+]
+keywords = ["ai", "agent", "skills", "validation", "linter", "cli"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Testing",
+    "Typing :: Typed",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "tiktoken>=0.7",
+]
+
+[project.urls]
+Repository = "https://github.com/swival/skillscheck"
+Issues = "https://github.com/swival/skillscheck/issues"
+
+[project.scripts]
+skillscheck = "skillscheck.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["skillscheck"]
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "ruff>=0.15",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
