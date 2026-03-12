@@ -7,7 +7,11 @@ import re
 from pathlib import Path
 
 from ..models import Diagnostic, Level, SPEC_URL, SkillInfo
-from ..mdutil import extract_fragment_links, extract_headings, extract_local_link_targets
+from ..mdutil import (
+    extract_fragment_links,
+    extract_headings,
+    extract_local_link_targets,
+)
 
 SECRET_FILENAMES = {
     ".env",
@@ -202,9 +206,7 @@ def _check_links(skill: SkillInfo) -> list[Diagnostic]:
     return diags
 
 
-def _check_fragment_links(
-    skill: SkillInfo, skill_dir: Path
-) -> list[Diagnostic]:
+def _check_fragment_links(skill: SkillInfo, skill_dir: Path) -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     fragment_links = extract_fragment_links(skill.body)
     self_headings = extract_headings(skill.body)
