@@ -51,6 +51,38 @@ class TestDescriptionQuality:
         diags = check_skill(skill)
         assert not _has_check(diags, "2a.description.no-when")
 
+    def test_user_centric_trigger_warning(self, tmp_path):
+        skill_dir = tmp_path / "user-centric"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: user-centric\ndescription: Generate dashboards. Use this whenever the user mentions data visualization.\n---\nBody content."
+        )
+        skill = parse_skill(skill_dir)
+        diags = check_skill(skill)
+        warnings = _warnings(diags)
+        assert _has_check(warnings, "2a.description.user-centric")
+
+    def test_user_asks_trigger_warning(self, tmp_path):
+        skill_dir = tmp_path / "user-asks"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: user-asks\ndescription: Use when the user asks about deployment pipelines.\n---\nBody content."
+        )
+        skill = parse_skill(skill_dir)
+        diags = check_skill(skill)
+        warnings = _warnings(diags)
+        assert _has_check(warnings, "2a.description.user-centric")
+
+    def test_agent_directed_no_user_centric_warning(self, tmp_path):
+        skill_dir = tmp_path / "agent-directed"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: agent-directed\ndescription: Use when working with PDF files or converting documents to PDF format.\n---\nBody content."
+        )
+        skill = parse_skill(skill_dir)
+        diags = check_skill(skill)
+        assert not _has_check(diags, "2a.description.user-centric")
+
     def test_parse_error_returns_empty(self, fixture_path):
         skill = parse_skill(fixture_path("missing-skillmd"))
         diags = check_skill(skill)

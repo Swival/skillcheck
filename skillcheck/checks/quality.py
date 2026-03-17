@@ -53,7 +53,12 @@ BINARY_EXTENSIONS = {
 }
 
 USE_WHEN_HINTS = re.compile(
-    r"\b(use when|use for|use if|use this|when you need|invoke when|trigger when|designed for)\b",
+    r"\b(use when|use for|use if|use this|when you need|invoke when|trigger when|designed for|required for|needed for)\b",
+    re.IGNORECASE,
+)
+
+USER_CENTRIC_TRIGGER = re.compile(
+    r"\b(whenever the user|when the user|if the user|user asks|user mentions|user requests|user wants)\b",
     re.IGNORECASE,
 )
 
@@ -98,6 +103,17 @@ def _check_description_quality(skill: SkillInfo) -> list[Diagnostic]:
                 "description doesn't indicate when to use the skill (spec recommends describing both what and when)",
                 path=skill.skill_md_path,
                 source_url=SPEC_URL,
+            )
+        )
+
+    if USER_CENTRIC_TRIGGER.search(desc):
+        diags.append(
+            Diagnostic(
+                Level.WARNING,
+                "2a.description.user-centric",
+                "description uses user-centric trigger (e.g. 'whenever the user mentions') — "
+                "prefer agent-directed phrasing (e.g. 'Use when working with…')",
+                path=skill.skill_md_path,
             )
         )
 
