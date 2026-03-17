@@ -1,4 +1,4 @@
-from skillcheck.cli import main
+from skillscheck.cli import main
 
 if __name__ == "__main__":
     main()
