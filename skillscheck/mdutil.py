@@ -134,6 +134,55 @@ def extract_fragment_links(text: str) -> list[tuple[str, str]]:
     return results
 
 
+def find_unclosed_fence(text: str) -> int | None:
+    """Find an unclosed code fence. Returns the 1-based line number or None."""
+    lines = text.split("\n")
+    in_fence = False
+    fence_char = ""
+    fence_len = 0
+    fence_line = 0
+
+    for i, line in enumerate(lines):
+        # Strip up to 3 leading spaces (CommonMark)
+        stripped = line
+        for _ in range(3):
+            if stripped.startswith(" "):
+                stripped = stripped[1:]
+            else:
+                break
+
+        if not in_fence:
+            char, n = _fence_prefix(stripped)
+            if n >= 3:
+                in_fence = True
+                fence_char = char
+                fence_len = n
+                fence_line = i + 1
+        else:
+            char, n = _fence_prefix(stripped)
+            if n >= fence_len and char == fence_char:
+                # Closing fence: rest must be only whitespace
+                if stripped[n:].strip() == "":
+                    in_fence = False
+
+    return fence_line if in_fence else None
+
+
+def _fence_prefix(line: str) -> tuple[str, int]:
+    """Return (fence_char, count) if line starts with 3+ backticks or tildes."""
+    if not line:
+        return "", 0
+    ch = line[0]
+    if ch not in ("`", "~"):
+        return "", 0
+    n = 0
+    while n < len(line) and line[n] == ch:
+        n += 1
+    if n < 3:
+        return "", 0
+    return ch, n
+
+
 def extract_local_link_targets(text: str) -> list[str]:
     clean = strip_code(text)
     targets = []

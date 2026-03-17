@@ -381,3 +381,245 @@ class TestLinks:
         skill = parse_skill(skill_dir)
         diags = check_skill(skill)
         assert not _has_check(diags, "2c.broken-link.fragment")
+
+
+def _infos(diags):
+    return [d for d in diags if d.level == Level.INFO]
+
+
+def _make_skill_dir(
+    tmp_path,
+    name,
+    desc="A helpful skill. Use when testing.",
+    body="# Title\n\nBody content.",
+):
+    """Create a skill directory and return its path. Call parse_skill() separately."""
+    skill_dir = tmp_path / name
+    skill_dir.mkdir()
+    import yaml
+
+    fm = yaml.dump({"name": name, "description": desc}, default_flow_style=False)
+    (skill_dir / "SKILL.md").write_text(f"---\n{fm}---\n{body}")
+    return skill_dir
+
+
+class TestKeywordStuffing:
+    def test_quoted_string_stuffing_info(self, tmp_path):
+        desc = '"deploy" "build" "test" "lint" "format" "check"'
+        skill = parse_skill(_make_skill_dir(tmp_path, "kw-stuff", desc))
+        diags = check_skill(skill)
+        assert _has_check(_infos(diags), "2a.description.keyword-stuffing")
+
+    def test_quoted_strings_with_prose_no_warning(self, tmp_path):
+        desc = (
+            'Handles deployment tasks including "deploy", "build", "test", '
+            '"lint", and "format" operations. Use when working with CI/CD.'
+        )
+        skill = parse_skill(_make_skill_dir(tmp_path, "kw-prose", desc))
+        diags = check_skill(skill)
+        assert not _has_check(diags, "2a.description.keyword-stuffing")
+
+    def test_few_quoted_strings_no_warning(self, tmp_path):
+        desc = 'Supports "json" and "yaml" formats. Use when parsing config files.'
+        skill = parse_skill(_make_skill_dir(tmp_path, "kw-few", desc))
+        diags = check_skill(skill)
+        assert not _has_check(diags, "2a.description.keyword-stuffing")
+
+    def test_comma_list_stuffing_info(self, tmp_path):
+        desc = "deploy, build, test, lint, format, check, validate, publish, release"
+        skill = parse_skill(_make_skill_dir(tmp_path, "kw-comma", desc))
+        diags = check_skill(skill)
+        assert _has_check(_infos(diags), "2a.description.keyword-stuffing")
+
+    def test_comma_list_with_long_segments_no_warning(self, tmp_path):
+        desc = (
+            "This skill handles complex deployment workflows, "
+            "automated build pipelines for multiple architectures, "
+            "comprehensive test suites with coverage reporting, "
+            "code linting with custom rulesets, "
+            "formatting across multiple languages, "
+            "validation of configuration files, "
+            "publishing to package registries, "
+            "release management with changelogs, "
+            "and rollback procedures for failed deployments. "
+            "Use when managing CI/CD."
+        )
+        skill = parse_skill(_make_skill_dir(tmp_path, "kw-long-seg", desc))
+        diags = check_skill(skill)
+        assert not _has_check(diags, "2a.description.keyword-stuffing")
+
+    def test_normal_description_no_warning(self, fixture_path):
+        skill = parse_skill(fixture_path("valid-minimal"))
+        diags = check_skill(skill)
+        assert not _has_check(diags, "2a.description.keyword-stuffing")
+
+
+class TestExtraneousFiles:
+    def test_readme_at_root_info(self, tmp_path):
+        d = _make_skill_dir(tmp_path, "has-readme")
+        (d / "README.md").write_text("# About")
+        diags = check_skill(parse_skill(d))
+        assert _has_check(_infos(diags), "2b.extraneous-file")
+
+    def test_license_at_root_info(self, tmp_path):
+        d = _make_skill_dir(tmp_path, "has-license")
+        (d / "LICENSE").write_text("MIT")
+        diags = check_skill(parse_skill(d))
+        assert _has_check(_infos(diags), "2b.extraneous-file")
+
+    def test_makefile_at_root_info(self, tmp_path):
+        d = _make_skill_dir(tmp_path, "has-makefile")
+        (d / "Makefile").write_text("all:")
+        diags = check_skill(parse_skill(d))
+        assert _has_check(_infos(diags), "2b.extraneous-file")
+
+    def test_gitignore_at_root_info(self, tmp_path):
+        d = _make_skill_dir(tmp_path, "has-gitignore")
+        (d / ".gitignore").write_text("*.pyc")
+        diags = check_skill(parse_skill(d))
+        # .gitignore starts with "." — our check skips dotfiles
+        assert not _has_check(diags, "2b.extraneous-file")
+
+    def test_clean_skill_no_extraneous(self, fixture_path):
+        diags = check_skill(parse_skill(fixture_path("valid-minimal")))
+        assert not _has_check(diags, "2b.extraneous-file")
+
+    def test_references_dir_not_flagged(self, tmp_path):
+        d = _make_skill_dir(tmp_path, "has-refs")
+        (d / "references").mkdir()
+        (d / "references" / "guide.md").write_text("# Guide")
+        diags = check_skill(parse_skill(d))
+        assert not _has_check(diags, "2b.extraneous-file")
+
+
+class TestUnclosedFences:
+    def test_unclosed_backtick_fence_error(self, tmp_path):
+        body = "# Title\n\n```python\nprint('hello')\n\nMore text."
+        diags = check_skill(
+            parse_skill(_make_skill_dir(tmp_path, "unclosed-bt", body=body))
+        )
+        assert _has_check(_errors(diags), "2d.unclosed-fence")
+
+    def test_unclosed_tilde_fence_error(self, tmp_path):
+        body = "# Title\n\n~~~\ncode here\n\nMore text."
+        diags = check_skill(
+            parse_skill(_make_skill_dir(tmp_path, "unclosed-tilde", body=body))
+        )
+        assert _has_check(_errors(diags), "2d.unclosed-fence")
+
+    def test_closed_fence_no_error(self, tmp_path):
+        body = "# Title\n\n```python\nprint('hello')\n```\n\nMore text."
+        diags = check_skill(
+            parse_skill(_make_skill_dir(tmp_path, "closed-fence", body=body))
+        )
+        assert not _has_check(diags, "2d.unclosed-fence")
+
+    def test_multiple_closed_fences_no_error(self, tmp_path):
+        body = "# Title\n\n```\ncode1\n```\n\n~~~\ncode2\n~~~\n\nDone."
+        diags = check_skill(
+            parse_skill(_make_skill_dir(tmp_path, "multi-fence", body=body))
+        )
+        assert not _has_check(diags, "2d.unclosed-fence")
+
+    def test_no_fences_no_error(self, tmp_path):
+        body = "# Title\n\nJust regular text."
+        diags = check_skill(
+            parse_skill(_make_skill_dir(tmp_path, "no-fence", body=body))
+        )
+        assert not _has_check(diags, "2d.unclosed-fence")
+
+    def test_unclosed_fence_in_reference_file(self, tmp_path):
+        body = "# Title\n\nSee [guide](references/guide.md)."
+        d = _make_skill_dir(tmp_path, "ref-unclosed", body=body)
+        (d / "references").mkdir()
+        (d / "references" / "guide.md").write_text("# Guide\n\n```\nunclosed code\n")
+        diags = check_skill(parse_skill(d))
+        assert _has_check(_errors(diags), "2d.unclosed-fence")
+
+    def test_closed_fence_in_reference_no_error(self, tmp_path):
+        body = "# Title\n\nSee [guide](references/guide.md)."
+        d = _make_skill_dir(tmp_path, "ref-closed", body=body)
+        (d / "references").mkdir()
+        (d / "references" / "guide.md").write_text("# Guide\n\n```\nclosed\n```\n")
+        diags = check_skill(parse_skill(d))
+        assert not _has_check(diags, "2d.unclosed-fence")
+
+    def test_fence_line_number_includes_offset(self, tmp_path):
+        body = "# Title\n\nSome text.\n\n```python\nunclosed"
+        skill = parse_skill(_make_skill_dir(tmp_path, "fence-line", body=body))
+        diags = [d for d in check_skill(skill) if d.check == "2d.unclosed-fence"]
+        assert len(diags) == 1
+        assert diags[0].line is not None
+        assert diags[0].line > 5  # offset + body line
+
+    def test_longer_closing_fence_accepted(self, tmp_path):
+        body = "# Title\n\n```\ncode\n````\n\nText."
+        diags = check_skill(
+            parse_skill(_make_skill_dir(tmp_path, "long-close", body=body))
+        )
+        assert not _has_check(diags, "2d.unclosed-fence")
+
+    def test_mismatched_fence_char_not_closed(self, tmp_path):
+        body = "# Title\n\n```\ncode\n~~~\n\nText."
+        diags = check_skill(
+            parse_skill(_make_skill_dir(tmp_path, "mismatch-fence", body=body))
+        )
+        assert _has_check(_errors(diags), "2d.unclosed-fence")
+
+
+class TestOrphanFiles:
+    def test_referenced_file_no_warning(self, tmp_path):
+        body = "# Title\n\nRun [extract](scripts/extract.py) to process."
+        d = _make_skill_dir(tmp_path, "ref-file", body=body)
+        (d / "scripts").mkdir()
+        (d / "scripts" / "extract.py").write_text("print('hello')")
+        diags = check_skill(parse_skill(d))
+        assert not _has_check(diags, "2b.orphan")
+
+    def test_unreferenced_file_info(self, tmp_path):
+        body = "# Title\n\nJust instructions."
+        d = _make_skill_dir(tmp_path, "orphan-file", body=body)
+        (d / "scripts").mkdir()
+        (d / "scripts" / "unused.py").write_text("print('hello')")
+        diags = check_skill(parse_skill(d))
+        assert _has_check(_infos(diags), "2b.orphan")
+
+    def test_filename_mention_counts_as_reference(self, tmp_path):
+        body = "# Title\n\nUse extract.py to process files."
+        d = _make_skill_dir(tmp_path, "name-ref", body=body)
+        (d / "scripts").mkdir()
+        (d / "scripts" / "extract.py").write_text("print('hello')")
+        diags = check_skill(parse_skill(d))
+        assert not _has_check(diags, "2b.orphan")
+
+    def test_empty_dirs_no_orphan(self, tmp_path):
+        body = "# Title\n\nInstructions."
+        d = _make_skill_dir(tmp_path, "empty-dirs", body=body)
+        (d / "scripts").mkdir()
+        (d / "references").mkdir()
+        diags = check_skill(parse_skill(d))
+        assert not _has_check(diags, "2b.orphan")
+
+    def test_init_py_not_flagged(self, tmp_path):
+        body = "# Title\n\nInstructions."
+        d = _make_skill_dir(tmp_path, "init-py", body=body)
+        (d / "scripts").mkdir()
+        (d / "scripts" / "__init__.py").write_text("")
+        diags = check_skill(parse_skill(d))
+        assert not _has_check(diags, "2b.orphan")
+
+    def test_multiple_dirs_mixed(self, tmp_path):
+        body = "# Title\n\nSee [ref](references/guide.md). Also run helper.sh."
+        d = _make_skill_dir(tmp_path, "multi-dir", body=body)
+        (d / "references").mkdir()
+        (d / "references" / "guide.md").write_text("# Guide")
+        (d / "references" / "orphan.md").write_text("# Orphan")
+        (d / "scripts").mkdir()
+        (d / "scripts" / "helper.sh").write_text("echo hi")
+        (d / "scripts" / "unused.sh").write_text("echo bye")
+        diags = check_skill(parse_skill(d))
+        orphans = [d for d in diags if d.check == "2b.orphan"]
+        orphan_paths = [d.message for d in orphans]
+        assert len(orphans) == 2
+        assert any("orphan.md" in m for m in orphan_paths)
+        assert any("unused.sh" in m for m in orphan_paths)

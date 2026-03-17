@@ -1,4 +1,4 @@
-"""Quality checks (2a-2c)."""
+"""Quality checks (2a-2d)."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from ..mdutil import (
     extract_fragment_links,
     extract_headings,
     extract_local_link_targets,
+    find_unclosed_fence,
 )
 
 SECRET_FILENAMES = {
@@ -57,6 +58,27 @@ USE_WHEN_HINTS = re.compile(
     re.IGNORECASE,
 )
 
+QUOTED_STRING_RE = re.compile(r'"[^"]*"')
+
+# Files commonly found in repos but not intended for agent consumption.
+# Agents may load these into their context window, wasting space.
+EXTRANEOUS_FILES = {
+    "readme.md",
+    "readme",
+    "readme.txt",
+    "readme.rst",
+    "changelog.md",
+    "changelog",
+    "changelog.txt",
+    "license",
+    "license.md",
+    "license.txt",
+    "contributing.md",
+    "code_of_conduct.md",
+    "makefile",
+    "agents.md",
+}
+
 USER_CENTRIC_TRIGGER = re.compile(
     r"\b(whenever the user|when the user|if the user|user asks|user mentions|user requests|user wants)\b",
     re.IGNORECASE,
@@ -73,6 +95,8 @@ def check_skill(skill: SkillInfo) -> list[Diagnostic]:
     diags.extend(_check_description_quality(skill))
     diags.extend(_check_file_hygiene(skill))
     diags.extend(_check_links(skill))
+    diags.extend(_check_unclosed_fences(skill))
+    diags.extend(_check_orphan_files(skill))
     return diags
 
 
@@ -117,12 +141,16 @@ def _check_description_quality(skill: SkillInfo) -> list[Diagnostic]:
             )
         )
 
+    diags.extend(_check_keyword_stuffing(desc, skill.skill_md_path))
+
     return diags
 
 
 def _check_file_hygiene(skill: SkillInfo) -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     skill_dir = Path(skill.dir_path)
+
+    diags.extend(_check_extraneous_files(skill_dir))
 
     for dirpath, _dirnames, filenames in os.walk(skill_dir):
         for fname in filenames:
@@ -198,6 +226,115 @@ def _check_file_hygiene(skill: SkillInfo) -> list[Diagnostic]:
     return diags
 
 
+def _check_extraneous_files(skill_dir: Path) -> list[Diagnostic]:
+    diags: list[Diagnostic] = []
+    try:
+        entries = list(os.scandir(skill_dir))
+    except OSError:
+        return diags
+
+    for entry in sorted(entries, key=lambda e: e.name):
+        name = entry.name
+        if name == "SKILL.md" or name.startswith("."):
+            continue
+        if entry.is_dir():
+            continue
+        lower = name.lower()
+        if lower in EXTRANEOUS_FILES:
+            diags.append(
+                Diagnostic(
+                    Level.INFO,
+                    "2b.extraneous-file",
+                    f"'{name}' is not needed in a skill — agents may load it "
+                    "into their context window, wasting space that could be "
+                    "used for actual instructions",
+                    path=str(skill_dir / name),
+                )
+            )
+    return diags
+
+
+def _check_keyword_stuffing(desc: str, path: str) -> list[Diagnostic]:
+    # Heuristic 1: many quoted strings with little surrounding prose.
+    # Descriptions with substantial prose alongside quoted trigger lists are
+    # fine — the spec encourages keywords. This catches descriptions that are
+    # *only* keyword lists.
+    quotes = QUOTED_STRING_RE.findall(desc)
+    if len(quotes) >= 5:
+        prose = QUOTED_STRING_RE.sub("", desc)
+        prose_words = [w for w in prose.split() if any(c.isalnum() for c in w)]
+        if len(prose_words) < len(quotes):
+            return [
+                Diagnostic(
+                    Level.INFO,
+                    "2a.description.keyword-stuffing",
+                    f"description contains {len(quotes)} quoted strings with "
+                    "little surrounding prose — consider also explaining what "
+                    "the skill does and when to activate it",
+                    path=path,
+                    source_url=SPEC_URL,
+                )
+            ]
+
+    # Heuristic 2: long comma-separated list of short segments in a single
+    # sentence, suggesting a bare keyword dump.
+    desc_no_quotes = QUOTED_STRING_RE.sub("", desc)
+    for sentence in _split_sentences(desc_no_quotes):
+        segments = [s.strip() for s in sentence.split(",") if s.strip()]
+        if len(segments) >= 8:
+            short = sum(1 for s in segments if len(s.split()) <= 3)
+            if short * 100 // len(segments) >= 60:
+                return [
+                    Diagnostic(
+                        Level.INFO,
+                        "2a.description.keyword-stuffing",
+                        f"description has {len(segments)} comma-separated "
+                        "segments, most very short — consider also explaining "
+                        "what the skill does and when to activate it",
+                        path=path,
+                        source_url=SPEC_URL,
+                    )
+                ]
+
+    return []
+
+
+_PERIOD_PLACEHOLDER = "\u222f"  # ∯ — extremely unlikely in skill descriptions
+_ABBREV_RE = re.compile(r"(?i)\b(e\.g|i\.e|vs|al|approx|etc)\.\s")
+_DIGIT_PERIOD_RE = re.compile(r"(\d)\.(\d)")
+_SENTENCE_BOUNDARY_RE = re.compile(r"[.!?]\s+([A-Z])")
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Split text into sentences using a lightweight heuristic."""
+    if not text:
+        return []
+    # Protect abbreviations and decimal numbers from being treated as boundaries
+    protected = _ABBREV_RE.sub(
+        lambda m: m.group().replace(".", _PERIOD_PLACEHOLDER),
+        text,
+    )
+    protected = _DIGIT_PERIOD_RE.sub(
+        lambda m: m.group(1) + _PERIOD_PLACEHOLDER + m.group(2),
+        protected,
+    )
+
+    parts: list[str] = []
+    # Split on sentence-ending punctuation followed by whitespace + uppercase
+    indices = list(_SENTENCE_BOUNDARY_RE.finditer(protected))
+    start = 0
+    for m in indices:
+        cap_start = m.start(1)
+        s = protected[start:cap_start].strip().replace(_PERIOD_PLACEHOLDER, ".")
+        if s:
+            parts.append(s)
+        start = cap_start
+    remainder = protected[start:].strip().replace(_PERIOD_PLACEHOLDER, ".")
+    if remainder:
+        parts.append(remainder)
+    return parts
+
+
 def _check_links(skill: SkillInfo) -> list[Diagnostic]:
     diags: list[Diagnostic] = []
     if not skill.body:
@@ -259,6 +396,93 @@ def _check_fragment_links(skill: SkillInfo, skill_dir: Path) -> list[Diagnostic]
                         "2c.broken-link.fragment",
                         f"fragment '#{fragment}' does not match any heading in '{path_part}'",
                         path=skill.skill_md_path,
+                    )
+                )
+
+    return diags
+
+
+def _check_unclosed_fences(skill: SkillInfo) -> list[Diagnostic]:
+    """Check for unclosed code fences in SKILL.md and reference markdown files."""
+    diags: list[Diagnostic] = []
+    path = skill.skill_md_path
+
+    # Check SKILL.md body
+    fence_line = find_unclosed_fence(skill.body)
+    if fence_line is not None:
+        diags.append(
+            Diagnostic(
+                Level.ERROR,
+                "2d.unclosed-fence",
+                f"SKILL.md has an unclosed code fence starting at line "
+                f"{skill.body_line_offset + fence_line} — agents may "
+                f"misinterpret everything after it as code",
+                path=path,
+                line=skill.body_line_offset + fence_line,
+            )
+        )
+
+    # Check markdown files in references/
+    skill_dir = Path(skill.dir_path)
+    refs_dir = skill_dir / "references"
+    if refs_dir.is_dir():
+        for entry in sorted(refs_dir.iterdir()):
+            if entry.is_file() and entry.suffix.lower() == ".md":
+                try:
+                    content = entry.read_text(encoding="utf-8", errors="ignore")
+                except OSError:
+                    continue
+                fence_line = find_unclosed_fence(content)
+                if fence_line is not None:
+                    rel = entry.relative_to(skill_dir)
+                    diags.append(
+                        Diagnostic(
+                            Level.ERROR,
+                            "2d.unclosed-fence",
+                            f"'{rel}' has an unclosed code fence starting at "
+                            f"line {fence_line} — agents may misinterpret "
+                            f"everything after it as code",
+                            path=str(entry),
+                            line=fence_line,
+                        )
+                    )
+
+    return diags
+
+
+_RECOGNIZED_DIRS = {"scripts", "references", "assets"}
+
+
+def _check_orphan_files(skill: SkillInfo) -> list[Diagnostic]:
+    """Check for files in scripts/references/assets not referenced from SKILL.md."""
+    diags: list[Diagnostic] = []
+    if not skill.body:
+        return diags
+
+    skill_dir = Path(skill.dir_path)
+    body = skill.body
+
+    for subdir_name in sorted(_RECOGNIZED_DIRS):
+        subdir = skill_dir / subdir_name
+        if not subdir.is_dir():
+            continue
+        for fpath in sorted(subdir.rglob("*")):
+            if not fpath.is_file():
+                continue
+            # Skip __init__.py — these are package markers, not standalone files
+            if fpath.name == "__init__.py":
+                continue
+            rel = str(fpath.relative_to(skill_dir))
+            # Check if the file is referenced by its relative path or just
+            # its filename anywhere in the body (simple string containment).
+            if rel not in body and fpath.name not in body:
+                diags.append(
+                    Diagnostic(
+                        Level.INFO,
+                        "2b.orphan",
+                        f"'{rel}' is not referenced from SKILL.md — agents "
+                        "may not discover this file",
+                        path=str(fpath),
                     )
                 )
 
