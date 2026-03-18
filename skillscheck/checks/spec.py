@@ -493,16 +493,6 @@ def _check_body(skill: SkillInfo) -> list[Diagnostic]:
                 source_url=SPEC_URL,
             )
         )
-    elif token_estimate > 2000:
-        diags.append(
-            Diagnostic(
-                Level.INFO,
-                "1e.body.tokens",
-                f"SKILL.md body is ~{token_estimate} tokens (spec recommends < 2000, warns at 5000)",
-                path=path,
-                source_url=SPEC_URL,
-            )
-        )
 
     return diags
 

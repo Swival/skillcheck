@@ -239,20 +239,6 @@ class TestBody:
         warnings = _warnings(diags)
         assert _has_check(warnings, "1e.body.tokens")
 
-    def test_moderate_token_body_info_includes_recommendation(self, tmp_path):
-        skill_dir = tmp_path / "mid-body"
-        skill_dir.mkdir()
-        body = "word " * 2500
-        (skill_dir / "SKILL.md").write_text(
-            f"---\nname: mid-body\ndescription: test. Use when testing.\n---\n{body}"
-        )
-        skill = parse_skill(skill_dir)
-        diags = check_skill(skill)
-        infos = [d for d in diags if d.level.value == "info"]
-        token_diags = [d for d in infos if d.check == "1e.body.tokens"]
-        assert len(token_diags) == 1
-        assert "recommends" in token_diags[0].message
-
 
 class TestVersionField:
     def test_version_is_unknown_field(self, tmp_path):
